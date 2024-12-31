@@ -6,7 +6,7 @@ const userInput = document.getElementById("user-input");
 const apiSelector = document.getElementById("api-selector");
 const newChatBtn = document.getElementById("new-chat-btn");
 
-const BASE_URL = process.env.API_ENDPOINT;
+const BASE_URL = "https://ssafy-backend-gwangju2.fly.dev";
 
 let db;
 
@@ -138,33 +138,25 @@ function scrollToBottom() {
 async function getAssistantResponse(userMessage) {
   const mode = apiSelector.value;
   let url;
-  let payload;
 
   if (mode === "assistant") {
     const thread_id = await getMetadata("thread_id");
-    payload = { message: userMessage };
+    url = `${BASE_URL}/assistant?message=${encodeURIComponent(userMessage)}`;
     if (thread_id) {
-      payload.thread_id = thread_id;
+      url += `&thread_id=${encodeURIComponent(thread_id)}`;
     }
-    url = `${BASE_URL}/assistant`;
   } else {
     // Naive mode
-    const allMsgs = await getAllMessages();
-    const messagesForAPI = [
-      { role: "system", content: "You are a helpful assistant." },
-      ...allMsgs.map((m) => ({ role: m.role, content: m.content })),
-      { role: "user", content: userMessage },
-    ];
-    payload = { messages: messagesForAPI };
-    url = `${BASE_URL}/chat`;
+    //const query = JSON.stringify([{ role: "user", content: userMessage }]);
+    url = `${BASE_URL}/news?query=${encodeURIComponent(userMessage)}`;
+//    url = "https://ssafy-backend-gwangju2.fly.dev/news?query=%EC%8A%A4%ED%8F%AC%EC%B8%A0"
   }
 
   const response = await fetch(url, {
-    method: "POST",
+    method: "GET",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -172,12 +164,14 @@ async function getAssistantResponse(userMessage) {
   }
 
   const data = await response.json();
-
-  if (mode === "assistant" && data.thread_id) {
-    const existingThreadId = await getMetadata("thread_id");
-    if (!existingThreadId) {
-      await saveMetadata("thread_id", data.thread_id);
-    }
+  // 뉴스 응답 처리
+  if (mode !== "assistant") {
+    // 뉴스 배열 반환
+    return data.map(item => ({
+      title: item.title,
+      description: item.description,
+      link: item.link,
+    }));
   }
 
   return data.reply;
@@ -196,8 +190,27 @@ messageForm.addEventListener("submit", async (e) => {
 
   try {
     const response = await getAssistantResponse(message);
-    chatContainer.appendChild(createMessageBubble(response, "assistant"));
-    await saveMessage("assistant", response);
+
+    if (Array.isArray(response)) {
+      // 뉴스 응답 처리
+      response.forEach(news => {
+        const newsElement = document.createElement("div");
+        newsElement.classList.add("news-item", "p-3", "mb-4", "rounded-lg", "shadow");
+
+        newsElement.innerHTML = `
+          <h3 class="font-bold text-lg text-blue-600">${news.title}</h3>
+          <p class="text-gray-700">${news.description}</p>
+          <a href="${news.link}" target="_blank" class="text-blue-500 underline">Read more</a>
+        `;
+
+        chatContainer.appendChild(newsElement);
+      });
+    } else {
+      // 일반 응답 처리
+      chatContainer.appendChild(createMessageBubble(response, "assistant"));
+    }
+
+    await saveMessage("assistant", JSON.stringify(response));
     scrollToBottom();
   } catch (error) {
     console.error("Error fetching assistant response:", error);
@@ -207,6 +220,7 @@ messageForm.addEventListener("submit", async (e) => {
     scrollToBottom();
   }
 });
+
 
 async function loadExistingMessages() {
   const allMsgs = await getAllMessages();
